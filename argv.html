@@ -1,0 +1,473 @@
+<html>
+<head>
+<title>Argv - Not just another getopt.</title>
+<style type="text/css">
+dt { font-weight: bold; }
+code {
+  background-color: #EEF;
+}
+pre.example {
+  padding: 0.5em;
+  border: 2px solid #80F;
+  background-color: #EDF;
+}
+pre.proto {
+  margin-left: 5%;
+  padding: 0.5em;
+  border: 2px solid #00F;
+  background-color: #EEF;
+}
+</style>
+</head>
+<body>
+<h1>Argv - Not just another getopt.</h1>
+
+<p>Okay, so it is just another <code>getopt</code>. One with
+custom error callback functions, no global data, a useable API,
+and a modern common-usage command-line syntax that's compatible
+with <code>getopt</code>.</p>
+
+<h2><a name="contents">Contents</a></h2>
+
+<ul>
+<li><a href="#syntax">Command-line Syntax</a>
+<ul>
+<li><a href="#matching">Option Matching</a></li>
+<li><a href="#standards">Standards</a></li>
+</ul>
+</li>
+<li><a href="#interface">Interface</a>
+<ul>
+<li><a href="#ARGVPARSER"><code>ARGVPARSER</code></a></li>
+<li><a href="#ARGV"><code>ARGV</code></a></li>
+<li><a href="#ARGV_LAST"><code>ARGV_LAST</code></a></li>
+<li><a href="#ARGV_NOARG"><code>ARGV_NOARG</code></a></li>
+<li><a href="#ARGV_ARG"><code>ARGV_ARG</code></a></li>
+<li><a href="#ARGV_ARGA"><code>ARGV_ARGA</code></a></li>
+<li><a href="#ARGV_REQ"><code>ARGV_REQ</code></a></li>
+<li><a href="#ARGV_REQA"><code>ARGV_REQA</code></a></li>
+<li><a href="#argv_init"><code>argv_init</code></a></li>
+<li><a href="#argv_uninit"><code>argv_uninit</code></a></li>
+<li><a href="#argv_set_args"><code>argv_set_args</code></a></li>
+<li><a href="#argv_set_mixed"><code>argv_set_mixed</code></a></li>
+<li><a href="#argv_set_errorf"><code>argv_set_errorf</code></a></li>
+<li><a href="#argv_error_count"><code>argv_error_count</code></a></li>
+<li><a href="#argv_set_progname"><code>argv_set_progname</code></a></li>
+<li><a href="#argv_next"><code>argv_next</code></a></li>
+</ul>
+</li>
+<li><a href="#example">Example Usage</a></li>
+</ul>
+
+<hr>
+
+<h2><a name="syntax">Command-line Syntax</a></h2>
+
+<p>The following argument syntaxes are recognized:</p>
+
+<dl>
+<dt>Short option</dt>
+<dd>
+<p>Short options consist of a single character, preceeded by a single
+hyphen.</p>
+
+<p>The argument may be separate, assigned (attached with an equals sign),
+or attached directly.</p>
+
+<p>The argument must immediately follow the option.</p>
+
+<p>Multiple short options may be specified per hyphen. Only options
+that have either no argument or a non-attached required argument are
+allowed. Arguments to these options must not be assigned and must
+be given in the same order as the options.</p>
+
+<pre class="example">
+program -o          # no argument
+program -o arg      # separate argument
+program -o=arg      # assigned argument
+program -oarg       # attached argument
+program -abc b_arg  # multiple options
+</pre>
+</dd>
+
+<dt>Long option</dt>
+<dd>
+<p>Long options consist of a string, preceeded by one or two hyphens.</p>
+
+<p>The option name may be abbreviated to a unique prefix.</p>
+
+<p>The argument may be separate or assigned.</p>
+
+<p>The argument must immediately follow the option.</p>
+
+<pre class="example">
+program -opt     --opt      # no argument
+program -opt arg --opt arg  # separate argument
+program -opt=arg --opt=arg  # assigned argument
+</pre>
+</dd>
+
+<dt>Parameter</dt>
+<dd>
+<p>A parameter is an argument without an option.</p>
+
+<p>These may be mixed with options if
+<a href="#argv_set_mixed"><code>argv_set_mixed</code></a> is called with
+a non-zero value.</p>
+
+<pre class="example">
+program file1 -opt arg file2
+</pre>
+</dd>
+
+<dt>Single Hyphen</dt>
+<dd>
+<p>A single hyphen by itself is treated as an argument or parameter.</p>
+
+<pre class="example">
+program - -o -
+</pre>
+</dd>
+
+<dt>Double Hyphen</dt>
+<dd>
+<p>A doubled hyphen by itself is the end of options.
+Everything after is treated as a parameter.</p>
+
+<pre class="example">
+program --opt arg -- -param1 param2
+</pre>
+</dd>
+</dl>
+
+<h3><a name="matching">Option Matching</a></h3>
+
+<p>An option is matched as follows:</p>
+
+<ol type="1">
+<li>If the option is a single character and only one hyphen preceeds it,
+then look for a match to a short option.</li>
+<li>Look for an exact match to a long option.</li>
+<li>Look for a match to a unique prefix of a long option.</li>
+<li>If only one hyphen preceeds it, look for only those options
+that may have an attached argument.</li>
+<li>If only one hyphen preceeds it and the entire option string
+consists of valid short options, begin matching its contents.</li>
+<li>The option is unknown.</li>
+</ol>
+
+<p>Note that there are three ambiguous syntaxes:</p>
+
+<ul>
+<li>an attached argument</li>
+<li>a long option with a single hyphen</li>
+<li>multiple short options</li>
+</ul>
+
+<p>A multiple short option cannot be confused with an attached argument
+because options with attached arguments are not allowed in a multiple
+short option.</p>
+
+<p>Incorrect matches may occur under the following circumstances:</p>
+
+<ul>
+<li>Options &ldquo;<code>A</code>&rdquo; and &ldquo;<code>AB</code>&rdquo;
+are defined and &ldquo;<code>A</code>&rdquo; takes an attached argument
+which may be &ldquo;<code>B</code>&rdquo;.</li>
+
+<li>Options &ldquo;<code>A</code>&rdquo;, &ldquo;<code>B</code>&rdquo;,
+and &ldquo;<code>AB</code>&rdquo; are defined, and
+&ldquo;<code>A</code>&rdquo; and &ldquo;<code>B</code>&rdquo; are
+specified as a multiple short option.</li>
+</ul>
+
+<h3><a name="standards">Standards</a></h3>
+
+<p>This library can be used by programs that follow
+Utility Syntax Guidelines 3, 4, 5, 6, 7, 9, and 10
+in the Base Definitions volume of IEEE Std 1003.1-2001, Section 12.2,
+Utility Syntax Guidelines. This is the same as <code>getopt</code>.</p>
+
+<p>In other words: options may be a single alpha-numeric character (3),
+options start with a hyphen (4), multiple short
+options may be specified per hyphen (5), options and
+arguments are separate unless otherwise specified (6), all arguments
+may be non-optional (7), all options
+can optionally preceed all parameters (9), and the
+double-hyphen ends options (10).</p>
+
+<p>Compliance with these guidelines, and avoiding our additional
+features, is the program's responsibility.</p>
+
+<p>Additional features include: optional arguments, assigned
+arguments, mixed options and parameters, non-alpha-numeric options,
+and long options.</p>
+
+<hr>
+
+<h2><a name="interface">Interface</a></h2>
+
+<h3><a name="ARGVPARSER"><code>ARGVPARSER</code></a></h3>
+
+<p>The parser's state object. The internals are private. It should
+be declared directly, not as a pointer.</p>
+
+<pre class="example">
+ARGVPARSER apr;
+</pre>
+
+<h3><a name="ARGV"><code>ARGV</code></a></h3>
+
+<p>A <code>struct</code> that contains information on an option.
+These are declared as an array. The last entry in the array
+must be <a href="#ARGV_LAST"><code>ARGV_LAST</code></a>.</p>
+
+<p>The members are:</p>
+
+<dl>
+<dt><code>char optchar</code></dt>
+<dd>
+The short option character.
+</dd>
+<dt><code>char* optname</code></dt>
+<dd>
+The long option name.
+</dd>
+<dt><code>size_t optlen</code></dt>
+<dd>
+The long option name's length. If zero,
+<a href="#argv_init"><code>argv_init</code></a> and
+<a href="#argv_set_args"><code>argv_set_args</code></a> will
+replace it with the result of <code>strlen(optname)</code>.
+</dd>
+<dt><code>int optarg</code></dt>
+<dd>
+Information on the option's argument.
+</dd>
+<dt><code>int optval</code></dt>
+<dd>
+Value to uniquely identify this option. Values zero and one are reserved.
+This is the return value from <a href="#argv_next"><code>argv_next</code></a>
+when this option is found.
+</dd>
+</dl>
+
+<pre class="example">
+ARGV args[] = {
+    { 'a', NULL, 0, <a href="#ARGV_NOARG">ARGV_NOARG</a>, 'a' },
+    { 'b', "bb", 2, <a href="#ARGV_NOARG">ARGV_NOARG</a>, 'b' },
+    <a href="#ARGV_LAST">ARGV_LAST</a>
+};
+</pre>
+
+<h3><a name="ARGV_LAST"><code>ARGV_LAST</code></a></h3>
+
+<p>A macro declaring a <code>struct</code> of type
+<a href="#ARGV"><code>ARGV</code></a>
+to be used as the last member of an options array.</p>
+
+<h3><a name="ARGV_NOARG"><code>ARGV_NOARG</code></a></h3>
+
+<p>An <a href="#ARGV"><code>optarg</code></a> value.
+Declares the option to have no argument.</p>
+
+<h3><a name="ARGV_ARG"><code>ARGV_ARG</code></a></h3>
+
+<p>An <a href="#ARGV"><code>optarg</code></a> value.
+Declares the option to have an optional argument.</p>
+
+<h3><a name="ARGV_ARGA"><code>ARGV_ARGA</code></a></h3>
+
+<p>An <a href="#ARGV"><code>optarg</code></a> value.
+Declares the option to have an optional argument that may be attached.</p>
+
+<h3><a name="ARGV_REQ"><code>ARGV_REQ</code></a></h3>
+
+<p>An <a href="#ARGV"><code>optarg</code></a> value.
+Declares the option to have a required argument.</p>
+
+<h3><a name="ARGV_REQA"><code>ARGV_REQA</code></a></h3>
+
+<p>An <a href="#ARGV"><code>optarg</code></a> value.
+Declares the option to have a required argument that may be attached.</p>
+
+<h3><a name="argv_init"><code>argv_init</code></a></h3>
+
+<pre class="proto">
+int argv_init(<a href="#ARGVPARSER">ARGVPARSER</a> * apr,
+              <a href="#ARGV">ARGV</a> * args,
+              int argc,
+              char ** argv);
+</pre>
+
+<p>Initializes a parser object.</p>
+
+<p>Returns zero on success, negative on failure. (Don't worry. The
+current implementation doesn't fail.)</p>
+
+<h3><a name="argv_uninit"><code>argv_uninit</code></a></h3>
+
+<pre class="proto">
+void argv_uninit(<a href="#ARGVPARSER">ARGVPARSER</a> * apr);
+</pre>
+
+<p>Finalizes a parser object.</p>
+
+<p>Does not return a value.</p>
+
+<h3><a name="argv_set_args"><code>argv_set_args</code></a></h3>
+
+<pre class="proto">
+int argv_set_args(<a href="#ARGVPARSER">ARGVPARSER</a> * tk,
+                  <a href="#ARGV">ARGV</a> * args);
+</pre>
+
+<p>Change the current option array. This is only good for
+context-sensitive option parsing.</p>
+
+<p>Returns zero on success, negative on failure. (Don't worry. The
+current implementation doesn't fail.)</p>
+
+<h3><a name="argv_set_mixed"><code>argv_set_mixed</code></a></h3>
+
+<pre class="proto">
+int argv_set_mixed(<a href="#ARGVPARSER">ARGVPARSER</a> * apr,
+                   int mixed);
+</pre>
+
+<p>If <code>mixed</code> is non-zero, options and parameters can
+be mixed. If zero, all options must preceed all parameters.</p>
+
+<p>The command line will not be permuted to enforce this order. If
+<code>mixed</code> is zero, any options after the first parameter
+will be treated as parameters.</p>
+
+<p>The default is to not allow mixed options and parameters.</p>
+
+<p>Returns zero on success, negative on failure. (Don't worry. The
+current implementation doesn't fail.)</p>
+
+<h3><a name="argv_set_errorf"><code>argv_set_errorf</code></a></h3>
+
+<pre class="proto">
+int argv_set_errorf(<a href="#ARGVPARSER">ARGVPARSER</a> * apr,
+                    int (*cb)(const char *));
+</pre>
+
+<p>Set the error message callback function for a parser object. The function
+may be set to <code>NULL</code>.</p>
+
+<p>The callback function should behave similarly to <code>yyerror</code>
+from YACC.</p>
+
+<p>The default callback function prints the message and a newline
+to <code>stderr</code>.</p>
+
+<p>Returns zero on success, negative on failure. (Don't worry. The
+current implementation doesn't fail.)</p>
+
+<h3><a name="argv_error_count"><code>argv_error_count</code></a></h3>
+
+<pre class="proto">
+int argv_error_count(<a href="#ARGVPARSER">ARGVPARSER</a> * apr);
+</pre>
+
+<p>Return the number of errors a parser object has encountered.</p>
+
+<h3><a name="argv_set_progname"><code>argv_set_progname</code></a></h3>
+
+<pre class="proto">
+int argv_set_progname(<a href="#ARGVPARSER">ARGVPARSER</a> * apr,
+                      const char * progname);
+</pre>
+
+<p>Set the name of the program used in error messages. By default,
+<code>basename(argv[0])</code> will be used.</p>
+
+<p>Returns zero on success, negative on failure. (Don't worry. The
+current implementation doesn't fail.)</p>
+
+<h3><a name="argv_next"><code>argv_next</code></a></h3>
+
+<pre class="proto">
+int argv_next(<a href="#ARGVPARSER">ARGVPARSER</a> * apr,
+              char ** arg,
+              size_t * arglen);
+</pre>
+
+<p>Return the next option and argument.</p>
+
+<p>This function will not return when it encounters an error.
+The function specified by
+<a href="#argv_set_errorf"><code>argv_set_errorf</code></a>
+will be called with an error message and parsing will continue.</p>
+
+<p>The argument <code>arglen</code> may be <code>NULL</code>.</p>
+
+<p>The return value is:</p>
+
+<ul>
+<li>0 for the end of input</li>
+<li>1 for a parameter</li>
+<li>the value of <a href="#ARGV"><code>optval</code></a> for an option</li>
+</ul>
+
+<p>If an argument is found, a pointer to it will be placed in
+<code>*arg</code> and, if <code>arglen</code> is non-<code>NULL</code>,
+the length of the argument will be placed in <code>*arglen</code>.</p>
+
+<hr>
+
+<h2><a name="example">Example Usage</a></h2>
+
+<pre class="example">
+int
+main(int argc, char * argv[])
+{
+    <a href="#ARGV">ARGV</a> args[] = {
+        { 'D', NULL,      0, <a href="#ARGV_ARGA">ARGV_ARGA</a>,  'D' },
+        { 0,   "level",   5, <a href="#ARGV_ARG">ARGV_ARG</a>,   'L' },
+        { 'v', "verbose", 0, <a href="#ARGV_NOARG">ARGV_NOARG</a>, 'v' },
+        <a href="#ARGV_LAST">ARGV_LAST</a>
+    };
+    <a href="#ARGVPARSER">ARGVPARSER</a> apr;
+    int o;
+    size_t n = 0;
+    char * s = NULL;
+
+    <a href="#argv_init">argv_init</a>(&amp;apr, args, argc, argv);
+    <a href="#argv_set_mixed">argv_set_mixed</a>(&amp;apr, 1);
+
+    while ((o = <a href="#argv_next">argv_next</a>(&amp;apr, &amp;s, &amp;n))) {
+        switch (o) {
+        case 1:
+            if (!in_name) in_name = arg;
+            else if (!out_name) out_name = arg;
+            else {
+                fprintf(stderr, "too many files!\n");
+                exit(1);
+            }
+            break;
+        case 'D':
+            symbol_define(g_preproc, arg, arglen);
+            break;
+        case 'L':
+            if (arg) g_level = strtol(arg, NULL, 0);
+            break;
+        case 'v':
+            g_verbose++;
+            break;
+        default:
+            fprintf(stderr, "%c=%s,%d\n", o, s, (int)n);
+            break;
+        }
+    }
+    <a href="#argv_uninit">argv_uninit</a>(&amp;apr);
+    return 0;
+}
+</pre>
+
+<hr>
+
+</body>
+</html>
